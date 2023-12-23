@@ -4,7 +4,6 @@ Puntos Clave del Diseño y Desarrollo del Firmware:
 1)Rango de Temperatura Actual: Basado en el rango operativo de los sensores de temperatura en la industria automotriz, específicamente el termistor NTC Murata NCP15XH103F03RC.
 
 2)Estados del Compresor y la Resistencia Eléctrica:
-
 -Respuesta Equilibrada: Se utiliza una diferencia de 3 grados Celsius para cambiar los estados, evitando ciclos cortos y manteniendo una temperatura interior estable y confortable.
 -Adaptación a la Carga Térmica Variable: Permite ajustes efectivos del sistema ante cambios en la ocupación del autobús.
 -Confort Térmico de los Pasajeros: La diferencia de 3 grados es generalmente imperceptible, asegurando un confort constante.
