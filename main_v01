@@ -1,0 +1,164 @@
+/******************************************************************************
+Puntos Clave del Diseño y Desarrollo del Firmware:
+
+1)Rango de Temperatura Actual: Basado en el rango operativo de los sensores de temperatura en la industria automotriz, específicamente el termistor NTC Murata NCP15XH103F03RC.
+
+2)Estados del Compresor y la Resistencia Eléctrica:
+
+-Respuesta Equilibrada: Se utiliza una diferencia de 3 grados Celsius para cambiar los estados, evitando ciclos cortos y manteniendo una temperatura interior estable y confortable.
+-Adaptación a la Carga Térmica Variable: Permite ajustes efectivos del sistema ante cambios en la ocupación del autobús.
+-Confort Térmico de los Pasajeros: La diferencia de 3 grados es generalmente imperceptible, asegurando un confort constante.
+
+3)Velocidades de Ventiladores y Bomba de Agua: Funciones desarrolladas para controlar las velocidades de los ventiladores (del condensador y de las evaporadoras) y la bomba de agua, proporcionales a los estados del compresor y la resistencia eléctrica.
+
+4)Presión de Alta y Baja:
+-Funciones para calcular la presión en función del estado del compresor, únicamente para el subsistema de frío.
+-Estas mediciones son cruciales para el control automático, la detección de problemas y la eficiencia del sistema de enfriamiento.
+
+5)Registro de Datos en Archivo CSV:
+-Los datos se registran en un archivo CSV para análisis y referencia futura.
+-Las columnas del archivo incluyen: "temp_actual, temp_deseada, ventiladores_evaporadoras, presion_alta, presion_baja, estado_compresor, ventiladores_condensador, estado_resistencia, bomba_agua".
+*******************************************************************************/
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+
+// Definición de constantes para los rangos de temperatura deseada y actual
+#define TEMP_MIN_DES 18
+#define TEMP_MAX_DES 30
+#define TEMP_MIN_ACT -40 // Temp de Op. Min. típica de Sensores de Temp. para aplicación en la industria automotriz 
+#define TEMP_MAX_ACT 120 // Temp de Op. Max. típica de Sensores de Temp. para aplicación en la industria automotriz
+
+// Definición de constantes para las presiones en el sistema de climatización
+#define PRESION_ALTA_REPOSO 5.0   // Presión de alta en reposo (bares)
+#define PRESION_BAJA_REPOSO 5.0   // Presión de baja en reposo (bares)
+#define PRESION_ALTA_MAX 25.0     // Máxima presión de alta (bares)
+#define PRESION_BAJA_MIN 0.5      // Mínima presión de baja (bares)
+
+// Función para calcular el estado del compresor basado en la diferencia de temperatura
+int calcularEstadoCompresor(int tempDeseada, int tempActual) {
+    int diferencia = tempActual - tempDeseada;
+    if (diferencia <= 0) return 0; // OFF
+    if (diferencia <= 3) return 1; // MIN
+    if (diferencia <= 6) return 2; // MED
+    return 3; // MAX
+}
+
+// Función para calcular la velocidad de los ventiladores del condensador
+int calcularVentiladoresCondensador(int estadoCompresor) {
+    return 100 * estadoCompresor / 3.0;
+}
+
+// Función para calcular el estado de la resistencia eléctrica
+int calcularEstadoResistencia(int tempDeseada, int tempActual) {
+    int diferencia = tempDeseada - tempActual;
+    if (diferencia <= 0) return 0; // OFF
+    if (diferencia <= 3) return 1; // MIN
+    if (diferencia <= 6) return 2; // MED
+    return 3; // MAX
+}
+
+// Función para calcular la velocidad de la bomba de agua
+int calcularBombaAgua(int estadoResistencia) {
+    return 100 * estadoResistencia / 3.0;
+}
+
+// Función para calcular la velocidad de los ventiladores de las evaporadoras
+int calcularVentiladoresEvaporadoras(int estadoCompresor, int estadoResistencia) {
+    return 10 + (estadoCompresor + estadoResistencia) * 30.0;
+}
+
+// Función para calcular la presión de alta en el sistema
+float calcularPresionAlta(int estadoCompresor) {
+    return PRESION_ALTA_REPOSO + (PRESION_ALTA_MAX - PRESION_ALTA_REPOSO) * estadoCompresor / 3.0;
+}
+
+// Función para calcular la presión de baja en el sistema
+float calcularPresionBaja(int estadoCompresor) {
+    return PRESION_BAJA_REPOSO - (PRESION_BAJA_REPOSO - PRESION_BAJA_MIN) * estadoCompresor / 3.0;
+}
+
+// Función para limpiar el búfer de entrada (stdin)
+void limpiarBufferEntrada() {
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF); // Lee y descarta caracteres hasta el final de la línea o EOF
+}
+
+// Función para obtener una entrada numérica válida del usuario
+int obtenerEntrada(const char *prompt, int min, int max) {
+    int valor, resultado;
+    char linea[256];
+
+    while (1) {
+        printf("%s", prompt);
+        if (!fgets(linea, sizeof(linea), stdin)) {
+            // Error de lectura o fin de archivo (EOF)
+            continue;
+        }
+
+        resultado = sscanf(linea, "%d", &valor);
+        if (resultado == 1 && valor >= min && valor <= max) {
+            return valor;
+        }
+
+        printf("Entrada inválida o fuera de rango\n");
+    }
+}
+
+// Función principal del programa
+int main() {
+    // Declaración de variables
+    int tempDeseada, tempActual, ventiladoresEvaporadoras, estadoCompresor, ventiladoresCondensador, estadoResistencia, bombaAgua;
+    float presionAlta, presionBaja;
+    char input;
+
+    // Abrir el archivo para guardar los datos de la climatización
+    FILE *archivo = fopen("salida_climatizacion.csv", "w");
+    if (archivo == NULL) {
+        perror("Error al abrir el archivo");
+        return 1;
+    }
+    // Escribir la cabecera del archivo CSV
+    fprintf(archivo, "temp_actual,temp_deseada,ventiladores_evaporadoras,presion_alta,presion_baja,estado_compresor,ventiladores_condensador,estado_resistencia,bomba_agua\n");
+
+    // Bucle principal del programa
+    do {
+        // Obtener la temperatura deseada y actual
+        tempActual = obtenerEntrada("Ingrese la temperatura actual (-40 a 120): ", TEMP_MIN_ACT, TEMP_MAX_ACT);
+        tempDeseada = obtenerEntrada("Ingrese la temperatura deseada (18 a 30): ", TEMP_MIN_DES, TEMP_MAX_DES);
+    
+        // Realizar cálculos para el sistema de climatización
+        estadoCompresor = calcularEstadoCompresor(tempDeseada, tempActual);
+        ventiladoresCondensador = calcularVentiladoresCondensador(estadoCompresor);
+        estadoResistencia = calcularEstadoResistencia(tempDeseada, tempActual);
+        bombaAgua = calcularBombaAgua(estadoResistencia);
+        ventiladoresEvaporadoras = calcularVentiladoresEvaporadoras(estadoCompresor, estadoResistencia);
+        presionAlta = calcularPresionAlta(estadoCompresor);
+        presionBaja = calcularPresionBaja(estadoCompresor);
+    
+        // Mostrar los resultados en la consola
+        printf("Temperatura actual: %d\n", tempActual);
+        printf("Temperatura deseada: %d\n", tempDeseada);
+        printf("Ventiladores de las evaporadoras: %d\n", ventiladoresEvaporadoras);
+        printf("Presión de alta: %.2f bares\n", presionAlta);
+        printf("Presión de baja: %.2f bares\n", presionBaja);
+        printf("Estado del compresor: %d\n", estadoCompresor);
+        printf("Ventiladores del condensador: %d\n", ventiladoresCondensador);
+        printf("Estado de la resistencia eléctrica: %d\n", estadoResistencia);
+        printf("Bomba de Agua: %d\n", bombaAgua);
+
+
+        // Guardar los resultados en el archivo CSV
+        fprintf(archivo, "%d,%d,%d,%.2f,%.2f,%d,%d,%d,%d\n", tempActual, tempDeseada, ventiladoresEvaporadoras, presionAlta, presionBaja, estadoCompresor, ventiladoresCondensador, estadoResistencia, bombaAgua);
+    
+        // Pedir al usuario si desea continuar o salir
+        printf("Ingrese 's' para salir o cualquier otra tecla para continuar: ");
+        scanf(" %c", &input);
+        limpiarBufferEntrada(); // Limpia el búfer de entrada después de leer un carácter
+    } while (input != 's' && input != 'S'); 
+
+    // Finalizar el programa
+    printf("Datos guardados en salida_climatizacion.csv\n");
+    fclose(archivo);
+    return 0;
+}
